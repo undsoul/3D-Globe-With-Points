@@ -1,0 +1,12 @@
+{
+    "name": "Globe Visualization",
+    "description": "Interactive 3D globe visualization with location points",
+    "type": "visualization",
+    "version": "6.1.0",
+    "author": "MuchachoAI",
+    "icon": "globe",
+    "preview": "globe-preview.png",
+    "dependencies": {
+        "qlik-sense": ">=3.0.x"
+    }
+}
