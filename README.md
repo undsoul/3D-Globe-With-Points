@@ -20,7 +20,7 @@ The Qlik Sense Globe Points Extension is an interactive 3D globe visualization t
 ## Installation
 
 ### Qlik Sense Desktop
-1. Download the latest release from the [releases page](https://github.com/yourusername/qlik-globe-points/releases)
+1. Download the latest release from the [releases page](https://github.com/undsoul/qlik-globe-points/releases)
 2. Extract the zip file to your Qlik Sense Extensions directory:
    - Typically located at `C:\Users\[USERNAME]\Documents\Qlik\Sense\Extensions\`
 3. Restart Qlik Sense Desktop if it's already running
