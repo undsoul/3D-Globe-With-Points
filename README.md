@@ -3,7 +3,8 @@
 ## Overview
 The Qlik Sense Globe Points Extension is an interactive 3D globe visualization that allows you to plot geographical data points on a world map. This extension leverages D3.js to create a fully interactive, customizable globe that can display data points based on latitude and longitude coordinates, with support for measure-based styling.
 
-![Globe Points Extension Screenshot](screenshots/globe-preview.png)
+https://github.com/user-attachments/assets/4a20d88c-7858-4141-92b2-42bc13435611
+
 
 ## Features
 - Interactive 3D globe with smooth rotation and zoom capabilities
@@ -163,7 +164,7 @@ npm run build
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## Support
-For issues, feature requests, or questions, please [open an issue](https://github.com/yourusername/qlik-globe-points/issues) on the GitHub repository.
+For issues, feature requests, or questions, please [open an issue](https://github.com/undsoul/qlik-globe-points/issues) on the GitHub repository.
 
 ## Acknowledgements
 - World map data is based on [Natural Earth](https://www.naturalearthdata.com/)
