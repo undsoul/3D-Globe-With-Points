@@ -1,10 +1,21 @@
+/**
+ * Qlik Globe Points Visualization
+ * Part 1: Core Definition and Helper Functions
+ */
 define(['qlik', 'jquery', 'text!./globeCoordinates.json', './d3.v7'], function(qlik, $, worldJson, d3) {
     'use strict';
 
+    // Parse the world coordinates data
     const worldData = JSON.parse(worldJson);
-    let lastK = 2; // Initial Zoom
-
-    // Add CSS styles
+    
+    // Global state variables
+    let isDragging = false;
+    let isAnimating = false; 
+    let transformRef = { current: null };
+    let zoomControl = null;
+    let rotationTimer = null;
+    
+    // Add CSS styles for the extension
     const styleElement = document.createElement('style');
     styleElement.textContent = `
         .qv-extension-qlik-globe {
@@ -19,22 +30,93 @@ define(['qlik', 'jquery', 'text!./globeCoordinates.json', './d3.v7'], function(q
             height: 100%;
             display: block;
         }
+        .zoom-button {
+            padding: 8px;
+            width: 40px;
+            height: 40px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            background: white;
+            cursor: pointer;
+            font-size: 20px;
+            transition: all 0.2s ease;
+        }
         .zoom-button:active {
             background-color: #e6e6e6 !important;
             transform: scale(0.95);
         }
         .zoom-controls {
-            -webkit-touch-callout: none;
-            -webkit-user-select: none;
-            -khtml-user-select: none;
-            -moz-user-select: none;
-            -ms-user-select: none;
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            touch-action: none;
             user-select: none;
+        }
+        .zoom-indicator {
+            text-align: center;
+            margin: 5px 0;
+            font-size: 12px;
+            color: #333;
+        }
+        .globe-tooltip {
+            pointer-events: none;
+            transition: opacity 0.2s ease;
+            z-index: 999;
+            position: absolute;
         }
     `;
     document.head.appendChild(styleElement);
 
-    return {
+    // Helper function to get color value from either string or object
+    function getColor(colorObj, defaultColor) {
+        if (colorObj && typeof colorObj === 'object' && colorObj.color) {
+            return colorObj.color;
+        } else if (typeof colorObj === 'string') {
+            return colorObj;
+        }
+        return defaultColor;
+    }
+
+    // Helper function to check point visibility based on projection
+    function isPointVisible(d, projection) {
+        const rotate = projection.rotate();
+        const longitude = d.longitude + rotate[0];
+        const latitude = d.latitude + rotate[1];
+        return Math.cos(latitude * Math.PI / 180) * 
+               Math.cos(longitude * Math.PI / 180) > 0;
+    }
+
+    // Helper function to convert color to rgba
+    function colorWithOpacity(color, opacity) {
+        if (!color) return null;
+        
+        // If already rgba format
+        if (color.startsWith('rgba')) {
+            return color.replace(/[\d\.]+(?=\))/, opacity);
+        }
+        
+        // If rgb format
+        if (color.startsWith('rgb')) {
+            return color.replace('rgb', 'rgba').replace(')', `, ${opacity})`);
+        }
+        
+        // If hex format
+        if (color.startsWith('#')) {
+            let r = parseInt(color.slice(1, 3), 16);
+            let g = parseInt(color.slice(3, 5), 16);
+            let b = parseInt(color.slice(5, 7), 16);
+            return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+        }
+        
+        // Default fallback
+        return color;
+    }
+
+    // Extension definition starts here
+    let extensionDefinition = {
         initialProperties: {
             qHyperCubeDef: {
                 qDimensions: [],
@@ -65,7 +147,6 @@ define(['qlik', 'jquery', 'text!./globeCoordinates.json', './d3.v7'], function(q
                 pointSize: 3,
                 minPointSize: 2,
                 maxPointSize: 10,
-                colorType: "fixed",
                 sizeType: "fixed",
                 // Zoom properties
                 minZoomScale: 0.5,
@@ -77,6 +158,7 @@ define(['qlik', 'jquery', 'text!./globeCoordinates.json', './d3.v7'], function(q
                     color: "#ffffff",
                     index: -1
                 },
+                tooltipBackgroundOpacity: 1.0,
                 tooltipFontColor: {
                     color: "#19426C",
                     index: -1
@@ -97,6 +179,10 @@ define(['qlik', 'jquery', 'text!./globeCoordinates.json', './d3.v7'], function(q
                 tooltipMeasureLabel: "Value"
             }
         },
+        /**
+ * Qlik Globe Points Visualization
+ * Part 2: Property Panel Definition
+ */
         definition: {
             type: "items",
             component: "accordion",
@@ -164,37 +250,14 @@ define(['qlik', 'jquery', 'text!./globeCoordinates.json', './d3.v7'], function(q
                             label: "Point Settings",
                             type: "items",
                             items: {
-                                colorSettings: {
-                                    label: "Color Settings",
-                                    type: "items",
-                                    items: {
-                                        colorType: {
-                                            ref: "props.colorType",
-                                            label: "Point Color Type",
-                                            type: "string",
-                                            component: "buttongroup",
-                                            options: [{
-                                                value: "fixed",
-                                                label: "Fixed"
-                                            }, {
-                                                value: "measure",
-                                                label: "By Measure"
-                                            }],
-                                            defaultValue: "fixed"
-                                        },
-                                        pointColor: {
-                                            label: "Point Color",
-                                            component: "color-picker",
-                                            ref: "props.pointColor",
-                                            type: "object",
-                                            defaultValue: {
-                                                index: -1,
-                                                color: "#008936"
-                                            },
-                                            show: function(data) {
-                                                return data.props.colorType === "fixed";
-                                            }
-                                        }
+                                pointColor: {
+                                    label: "Point Color",
+                                    component: "color-picker",
+                                    ref: "props.pointColor",
+                                    type: "object",
+                                    defaultValue: {
+                                        index: -1,
+                                        color: "#008936"
                                     }
                                 },
                                 sizeSettings: {
@@ -258,6 +321,10 @@ define(['qlik', 'jquery', 'text!./globeCoordinates.json', './d3.v7'], function(q
                                 }
                             }
                         },
+                        /**
+ * Qlik Globe Points Visualization
+ * Part 3: Tooltip and Zoom Settings
+ */
                         tooltipSettings: {
                             label: "Tooltip Settings",
                             type: "items",
@@ -275,6 +342,16 @@ define(['qlik', 'jquery', 'text!./globeCoordinates.json', './d3.v7'], function(q
                                                 index: -1,
                                                 color: "#ffffff"
                                             }
+                                        },
+                                        tooltipBackgroundOpacity: {
+                                            ref: "props.tooltipBackgroundOpacity",
+                                            label: "Background Opacity",
+                                            type: "number",
+                                            component: "slider",
+                                            min: 0,
+                                            max: 1,
+                                            step: 0.1,
+                                            defaultValue: 1.0
                                         },
                                         tooltipFontColor: {
                                             label: "Font Color",
@@ -356,6 +433,10 @@ define(['qlik', 'jquery', 'text!./globeCoordinates.json', './d3.v7'], function(q
                                         }
                                     }
                                 },
+                                /**
+ * Qlik Globe Points Visualization
+ * Part 4: Shadow, Content, and Zoom Settings
+ */
                                 shadowSection: {
                                     label: "Shadow",
                                     type: "items",
@@ -467,31 +548,27 @@ define(['qlik', 'jquery', 'text!./globeCoordinates.json', './d3.v7'], function(q
                 }
             }
         },
-
-                        paint: function($element, layout) {
+        
+        // Additional module components will be included in subsequent parts
+        /**
+ * Qlik Globe Points Visualization
+ * Part 5: Paint Function Initialization
+ */
+        // Core visualization function
+        paint: function($element, layout) {
             try {
                 // Get properties from layout
                 const props = layout.props;
-
-                // Helper function to get color value from either string or object
-                function getColor(colorObj, defaultColor) {
-                    if (colorObj && typeof colorObj === 'object' && colorObj.color) {
-                        return colorObj.color;
-                    } else if (typeof colorObj === 'string') {
-                        return colorObj;
-                    }
-                    return defaultColor;
-                }
-
                 const rotationSpeed = props.rotationSpeed / 1000;
                 
+                // Clear the element and create container
                 const $container = $element.empty().append(`
                     <div class="qv-extension-qlik-globe">
                         <div id="globe-container-${layout.qInfo.qId}"></div>
                     </div>
                 `);
 
-                // Ensure data is properly formatted
+                // Process and format data from HyperCube
                 const data = layout.qHyperCube.qDataPages[0].qMatrix.map(row => ({
                     latitude: parseFloat(row[0].qNum),
                     longitude: parseFloat(row[1].qNum),
@@ -500,33 +577,33 @@ define(['qlik', 'jquery', 'text!./globeCoordinates.json', './d3.v7'], function(q
                     colorValue: row[4] ? row[4].qNum : null
                 })).filter(d => !isNaN(d.latitude) && !isNaN(d.longitude));
 
+                // Calculate container dimensions and globe radius
                 const container = document.getElementById(`globe-container-${layout.qInfo.qId}`);
                 const width = $container.width();
                 const height = $container.height();
                 const radius = Math.min(width, height) / 2.5;
 
-                // Define zoom scales
-                const minScale = radius * (layout.props.minZoomScale || 0.5);
-                const maxScale = radius * (layout.props.maxZoomScale || 2.5);
-                const defaultScale = radius * (layout.props.initialZoom || 1.25);
+                // Define zoom scales based on properties
+                const minScale = radius * (props.minZoomScale || 0.5);
+                const maxScale = radius * (props.maxZoomScale || 2.5);
+                const defaultScale = radius * (props.initialZoom || 1.25);
 
                 // Clear any existing SVG
                 d3.select(container).selectAll("svg").remove();
 
-                // Create SVG
+                // Create new SVG
                 const svg = d3.select(container)
                     .append("svg")
                     .attr("width", width)
                     .attr("height", height);
 
-                // Setup projection
+                // Setup projection and path generator
                 const projection = d3.geoOrthographic()
                     .scale(defaultScale)
                     .translate([width/2, height/2])
                     .center([0, 0])
                     .rotate([0, -25, 0]);
 
-                // Path generator
                 const path = d3.geoPath()
                     .projection(projection);
 
@@ -578,6 +655,10 @@ define(['qlik', 'jquery', 'text!./globeCoordinates.json', './d3.v7'], function(q
                     .attr("stroke", "#000")
                     .attr("stroke-width", 0.25);
 
+                /**
+                 * Qlik Globe Points Visualization
+                 * Part 6: Points and Tooltips
+                 */
                 // Add location points with visibility check
                 const dots = svg.selectAll("circle.location")
                     .data(data)
@@ -590,26 +671,35 @@ define(['qlik', 'jquery', 'text!./globeCoordinates.json', './d3.v7'], function(q
                         }
                         return props.pointSize;
                     })
-                    .attr("fill", getColor(props.pointColor, "#000075"));
+                    .attr("fill", getColor(props.pointColor, "#008936"));
 
-                // Create tooltip styles based on user settings
+                // Create tooltip with custom background opacity
+                // First remove any existing tooltips
+                d3.select("#globe-tooltip-" + layout.qInfo.qId).remove();
+                
+                // Create tooltip styles object with background opacity
                 const tooltipStyles = {
-                    "background-color": getColor(props.tooltipBackgroundColor, "rgba(255, 255, 255, 1)"),
+                    "background-color": function() {
+                        const color = getColor(props.tooltipBackgroundColor, "#ffffff");
+                        const opacity = props.tooltipBackgroundOpacity !== undefined ? 
+                            props.tooltipBackgroundOpacity : 1.0;
+                        return colorWithOpacity(color, opacity);
+                    }(),
                     "color": getColor(props.tooltipFontColor, "#19426C"),
-                    "border": props.tooltipBorderEnabled ? `${props.tooltipBorderWidth || 1}px solid ${getColor(props.tooltipBorderColor, "#FFFFFF")}` : "none",
+                    "border": props.tooltipBorderEnabled ? 
+                        `${props.tooltipBorderWidth || 1}px solid ${getColor(props.tooltipBorderColor, "#FFFFFF")}` : 
+                        "none",
                     "border-radius": `${props.tooltipBorderRadius !== undefined ? props.tooltipBorderRadius : 4}px`,
                     "padding": `${props.tooltipPadding || 8}px`,
                     "font-size": `${props.tooltipFontSize || 14}px`,
-                    "box-shadow": props.tooltipShadowEnabled ? `0 2px ${props.tooltipShadowBlur || 4}px rgba(0,0,0,${props.tooltipShadowOpacity || 0.2})` : "none",
+                    "box-shadow": props.tooltipShadowEnabled ? 
+                        `0 2px ${props.tooltipShadowBlur || 4}px rgba(0,0,0,${props.tooltipShadowOpacity || 0.2})` : 
+                        "none",
                     "pointer-events": "none",
                     "transition": "opacity 0.2s ease",
                     "z-index": "999",
                     "position": "absolute"
                 };
-                
-                // Add tooltips with customized styles
-                // First remove any existing tooltips
-                d3.select("#globe-tooltip-" + layout.qInfo.qId).remove();
                 
                 const tooltip = d3.select("body").append("div")
                     .attr("id", "globe-tooltip-" + layout.qInfo.qId)
@@ -621,16 +711,7 @@ define(['qlik', 'jquery', 'text!./globeCoordinates.json', './d3.v7'], function(q
                     tooltip.style(property, value);
                 });
 
-                // Helper function to check point visibility
-                function isPointVisible(d, projection) {
-                    const rotate = projection.rotate();
-                    const longitude = d.longitude + rotate[0];
-                    const latitude = d.latitude + rotate[1];
-                    return Math.cos(latitude * Math.PI / 180) * 
-                           Math.cos(longitude * Math.PI / 180) > 0;
-                }
-
-                // Update function with point visibility check
+                // Function to update point positions and visibility
                 function update() {
                     countries.attr("d", path);
                     
@@ -647,223 +728,8 @@ define(['qlik', 'jquery', 'text!./globeCoordinates.json', './d3.v7'], function(q
                         }
                     });
                 }
-
                 
-
-                // Add zoom controls container
-                const zoomControls = d3.select(`#globe-container-${layout.qInfo.qId}`)
-                    .append("div")
-                    .attr("class", "zoom-controls")
-                    .style("position", "absolute")
-                    .style("bottom", "20px")
-                    .style("left", "20px")
-                    .style("display", "flex")
-                    .style("flex-direction", "column")
-                    .style("gap", "5px")
-                    .style("touch-action", "none");
-
-                // Add zoom in button
-                zoomControls.append("button")
-                    .attr("class", "zoom-button")
-                    .style("padding", "8px")
-                    .style("width", "40px")
-                    .style("height", "40px")
-                    .style("border", "1px solid #ccc")
-                    .style("border-radius", "4px")
-                    .style("background", "white")
-                    .style("cursor", "pointer")
-                    .style("font-size", "20px")
-                    .html("&plus;")
-                    .on("click", () => {
-                        const zoomSpeed = layout.props.zoomSpeed || 1.2;
-                        zoomGlobe(zoomSpeed);
-                    });
-
-                // Add reset view button
-                zoomControls.append("button")
-                    .attr("class", "zoom-button")
-                    .style("padding", "8px")
-                    .style("width", "40px")
-                    .style("height", "40px")
-                    .style("border", "1px solid #ccc")
-                    .style("border-radius", "4px")
-                    .style("background", "white")
-                    .style("cursor", "pointer")
-                    .style("font-size", "18px")
-                    .html(`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
-                        <polyline points="9 22 9 12 15 12 15 22"></polyline>
-                    </svg>`)
-                    .on("click", resetView);
-
-                // Add zoom out button
-                zoomControls.append("button")
-                    .attr("class", "zoom-button")
-                    .style("padding", "8px")
-                    .style("width", "40px")
-                    .style("height", "40px")
-                    .style("border", "1px solid #ccc")
-                    .style("border-radius", "4px")
-                    .style("background", "white")
-                    .style("cursor", "pointer")
-                    .style("font-size", "20px")
-                    .html("&minus;")
-                    .on("click", () => {
-                        const zoomSpeed = layout.props.zoomSpeed || 1.2;
-                        zoomGlobe(1/zoomSpeed);
-                    });
-
-                // Add zoom percentage indicator
-                const zoomIndicator = zoomControls
-                    .append("div")
-                    .attr("class", "zoom-indicator")
-                    .style("text-align", "center")
-                    .style("margin", "5px 0");
-
-                function updateZoomIndicator(scale) {
-                    const percentage = Math.round((scale / radius) * 100);
-                    zoomIndicator.text(`${percentage}%`);
-                }
-
-                const controls = setupInteractions();
-
-                function zoomGlobe(factor) {
-                    // Get the current transform from our reference
-                    const currentTransform = controls.transformRef.current;
-                    
-                    // Calculate the new scale based on the zoom factor
-                    const newK = currentTransform.k * factor;
-                    
-                    // Create a new transform with the updated scale, constrained to our limits
-                    const newTransform = d3.zoomIdentity.scale(
-                        Math.max(
-                            layout.props.minZoomScale || 0.5, 
-                            Math.min(layout.props.maxZoomScale || 2.5, newK)
-                        )
-                    );
-                    
-                    // Apply the new transform with a smooth transition
-                    svg.transition()
-                        .duration(250)
-                        .call(controls.zoom.transform, newTransform);
-                }
-
-                function resetView() {
-                    const initialRotation = [0, -25, 0];
-                    const initialZoomScale = layout.props.initialZoom || 1.25;
-                    
-                    isAnimating = true;
-                    
-                    // Reset rotation with a smooth transition
-                    d3.transition()
-                        .duration(1000)
-                        .ease(d3.easeCubicInOut)
-                        .tween("reset", () => {
-                            const currentRotation = projection.rotate();
-                            const rotationInterpolator = d3.interpolate(currentRotation, initialRotation);
-                            
-                            return t => {
-                                projection.rotate(rotationInterpolator(t));
-                                countries.attr("d", path);
-                                update();
-                            };
-                        })
-                        .on("end", () => {
-                            isAnimating = false;
-                            
-                            // Reset zoom to initial scale with a smooth transition
-                            svg.transition()
-                                .duration(500)
-                                .call(controls.zoom.transform, d3.zoomIdentity.scale(initialZoomScale));
-                            
-                            // Restart rotation if enabled
-                            if (props.rotationSpeed > 0 && !isDragging) {
-                                startRotation();
-                            }
-                        });
-                }
-
-                // Setup combined zoom and drag interactions
-                function setupInteractions() {
-                    let isDragging = false;
-                    let isAnimating = false;
-                    
-                    // Store current transform for reference across function calls
-                    const transformRef = { current: d3.zoomIdentity.scale(1) };
-                    
-                    // Define zoom behavior with proper scale extents
-                    const zoom = d3.zoom()
-                        .scaleExtent([
-                            layout.props.minZoomScale || 0.5, 
-                            layout.props.maxZoomScale || 2.5
-                        ])
-                        .on("zoom", (event) => {
-                            if (isAnimating) return;
-                            
-                            // Update our transform reference
-                            transformRef.current = event.transform;
-                            
-                            // Calculate the absolute scale instead of relative scaling
-                            const newScale = defaultScale * event.transform.k;
-                            const constrainedScale = Math.max(minScale, Math.min(maxScale, newScale));
-                            
-                            // Apply the scale to the projection
-                            projection.scale(constrainedScale);
-                            
-                            // Update globe elements with the new scale
-                            d3.select("circle.ocean").attr("r", constrainedScale);
-                            d3.select("circle.outline").attr("r", constrainedScale);
-                            
-                            // Update country paths and points
-                            update();
-                            
-                            // Update zoom percentage indicator
-                            updateZoomIndicator(constrainedScale);
-                        });
-                
-                    // Define drag behavior (keep your existing code)
-                    const drag = d3.drag()
-                        .on("start", () => {
-                            isDragging = true;
-                            if (rotationTimer) rotationTimer.stop();
-                        })
-                        .on("drag", (event) => {
-                            if (isAnimating) return;
-                            
-                            const rotate = projection.rotate();
-                            const k = 75 / projection.scale();
-                            
-                            projection.rotate([
-                                rotate[0] + event.dx * k,
-                                Math.max(-90, Math.min(90, rotate[1] - event.dy * k)),
-                                rotate[2]
-                            ]);
-                            
-                            countries.attr("d", path);
-                            update();
-                        })
-                        .on("end", () => {
-                            isDragging = false;
-                            if (props.rotationSpeed > 0) {
-                                startRotation();
-                            }
-                        });
-                
-                    // Apply the zoom behavior to the SVG
-                    svg.call(zoom);
-                    
-                    // Apply the drag behavior to the SVG
-                    svg.call(drag);
-                    
-                    // Initialize the zoom to the correct scale based on initialZoom property
-                    const initialZoomScale = (layout.props.initialZoom || 1.25);
-                    svg.call(zoom.transform, d3.zoomIdentity.scale(initialZoomScale));
-                    
-                    // Return references needed for other functions
-                    return { zoom, transformRef };
-                }
-
-                // Tooltip events with customized content
+                // Setup tooltip events with enhanced interaction and customized content
                 dots.on("mouseover", function(event, d) {
                     const currentSize = props.sizeType === "measure" ? 
                         sizeScale(d.sizeValue) : props.pointSize;
@@ -884,8 +750,8 @@ define(['qlik', 'jquery', 'text!./globeCoordinates.json', './d3.v7'], function(q
                         tooltipContent += `<div>${d.sizeValue.toLocaleString()}</div>`;
                     }
                     
-                    // Add color value if using measure for color
-                    if (props.colorType === "measure" && d.colorValue !== null) {
+                    // Add color value if present
+                    if (d.colorValue !== null) {
                         tooltipContent += `<div>Color: ${d.colorValue.toLocaleString()}</div>`;
                     }
                     
@@ -911,19 +777,312 @@ define(['qlik', 'jquery', 'text!./globeCoordinates.json', './d3.v7'], function(q
                         .style("opacity", 0);
                 });
 
-                // Auto-rotation
-                let rotationTimer;
-                
+// End of Part 6
+                /**
+ * Qlik Globe Points Visualization
+ * Part 7: Zoom Controls
+ */
+                // Add zoom controls container
+                const zoomControls = d3.select(`#globe-container-${layout.qInfo.qId}`)
+                    .append("div")
+                    .attr("class", "zoom-controls")
+                    .style("touch-action", "none");
+
+                // Add zoom in button
+                zoomControls.append("button")
+                    .attr("class", "zoom-button")
+                    .html("&plus;")
+                    .on("click", () => {
+                        const zoomSpeed = props.zoomSpeed || 1.2;
+                        zoomGlobe(zoomSpeed);
+                    });
+
+                // Add reset view button
+                zoomControls.append("button")
+                    .attr("class", "zoom-button")
+                    .style("font-size", "18px")
+                    .html(`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+                        <polyline points="9 22 9 12 15 12 15 22"></polyline>
+                    </svg>`)
+                    .on("click", resetView);
+
+                // Add zoom out button
+                zoomControls.append("button")
+                    .attr("class", "zoom-button")
+                    .html("&minus;")
+                    .on("click", () => {
+                        const zoomSpeed = props.zoomSpeed || 1.2;
+                        zoomGlobe(1/zoomSpeed);
+                    });
+
+                // Add zoom percentage indicator
+                const zoomIndicator = zoomControls
+                    .append("div")
+                    .attr("class", "zoom-indicator");
+
+                // Function to update zoom indicator
+                function updateZoomIndicator(scale) {
+                    const percentage = Math.round((scale / radius) * 100);
+                    zoomIndicator.text(`${percentage}%`);
+                }
+
+                // Function to handle zoom interactions
+                function zoomGlobe(factor) {
+                    // Ensure we have a valid transform reference
+                    if (!transformRef.current) {
+                        transformRef.current = d3.zoomIdentity.scale(props.initialZoom || 1.25);
+                    }
+                    
+                    // Calculate the new scale factor
+                    const newK = transformRef.current.k * factor;
+                    
+                    // Create a new transform with the updated scale
+                    const newTransform = d3.zoomIdentity.scale(
+                        Math.max(
+                            props.minZoomScale || 0.5, 
+                            Math.min(props.maxZoomScale || 2.5, newK)
+                        )
+                    );
+                    
+                    // Apply the transform directly
+                    const newScale = defaultScale * newTransform.k;
+                    const constrainedScale = Math.max(minScale, Math.min(maxScale, newScale));
+                    
+                    // Apply with transition
+                    svg.transition()
+                        .duration(250)
+                        .tween("zoom", function() {
+                            const i = d3.interpolate(projection.scale(), constrainedScale);
+                            return function(t) {
+                                projection.scale(i(t));
+                                d3.select("circle.ocean").attr("r", i(t));
+                                d3.select("circle.outline").attr("r", i(t));
+                                update();
+                                updateZoomIndicator(i(t));
+                            };
+                        })
+                        .on("end", function() {
+                            transformRef.current = newTransform;
+                            zoomControl.scale = constrainedScale;
+                        });
+                }
+
+                // Fixed function to reset view (rotation and zoom)
+                function resetView() {
+                    const initialRotation = [0, -25, 0];
+                    const initialZoomScale = props.initialZoom || 1.25;
+                    const initialScale = defaultScale * initialZoomScale;
+                    
+                    isAnimating = true;
+                    
+                    // Stop rotation during animation
+                    if (rotationTimer) rotationTimer.stop();
+                    
+                    // Reset rotation with a smooth transition
+                    d3.transition()
+                        .duration(1000)
+                        .ease(d3.easeCubicInOut)
+                        .tween("reset", () => {
+                            const currentRotation = projection.rotate();
+                            const currentScale = projection.scale();
+                            
+                            const rotationInterpolator = d3.interpolate(currentRotation, initialRotation);
+                            const scaleInterpolator = d3.interpolate(currentScale, initialScale);
+                            
+                            return t => {
+                                projection.rotate(rotationInterpolator(t));
+                                projection.scale(scaleInterpolator(t));
+                                
+                                d3.select("circle.ocean").attr("r", scaleInterpolator(t));
+                                d3.select("circle.outline").attr("r", scaleInterpolator(t));
+                                
+                                update();
+                                updateZoomIndicator(scaleInterpolator(t));
+                            };
+                        })
+                        .on("end", () => {
+                            isAnimating = false;
+                            transformRef.current = d3.zoomIdentity.scale(initialZoomScale);
+                            
+                            // Restart rotation if enabled
+                            if (props.rotationSpeed > 0) {
+                                startRotation();
+                            }
+                        });
+                }
+
+// End of Part 7
+                /**
+ * Qlik Globe Points Visualization
+ * Part 8: Interactions
+ */
+                // Setup combined zoom and drag interactions - fixed to work properly
+                // Replace the setupInteractions function with this balanced version:
+
+                /**
+                 * Complete overhaul of the setupInteractions function
+                 * This focuses on reliable, simple implementation of both zoom and drag
+                 */
+                function setupInteractions() {
+                    // Clear existing event handlers to prevent conflicts
+                    svg.on(".zoom", null);
+                    svg.on(".drag", null);
+                    countries.on(".drag", null);
+                    d3.select("circle.ocean").on(".drag", null);
+                    
+                    // Mouse wheel zoom implementation
+                    svg.on("wheel", function(event) {
+                        // Prevent default scroll behavior
+                        event.preventDefault();
+                        
+                        // Direction and scaling
+                        const direction = event.deltaY < 0 ? 1 : -1;
+                        const factor = direction > 0 ? 1.1 : 0.9;
+                        
+                        // Get current scale
+                        const currentScale = projection.scale();
+                        
+                        // Calculate new scale with constraints
+                        const newScale = Math.max(
+                            minScale,
+                            Math.min(maxScale, currentScale * factor)
+                        );
+                        
+                        // Update projection with new scale
+                        projection.scale(newScale);
+                        
+                        // Update globe elements
+                        d3.select("circle.ocean").attr("r", newScale);
+                        d3.select("circle.outline").attr("r", newScale);
+                        
+                        // Update visualization
+                        update();
+                        updateZoomIndicator(newScale);
+                    });
+                    
+                    // Direct mouse drag implementation
+                    let isDragging = false;
+                    let previousMousePosition = null;
+                    
+                    svg.on("mousedown", function(event) {
+                        // Only allow primary button (left-click)
+                        if (event.button !== 0) return;
+                        
+                        // Check if click is inside the globe radius
+                        const mouse = d3.pointer(event, this);
+                        const centerX = width / 2;
+                        const centerY = height / 2;
+                        const distance = Math.sqrt(
+                            Math.pow(mouse[0] - centerX, 2) + 
+                            Math.pow(mouse[1] - centerY, 2)
+                        );
+                        
+                        // Only start drag if inside the globe
+                        if (distance <= projection.scale()) {
+                            isDragging = true;
+                            previousMousePosition = mouse;
+                            
+                            // Stop rotation
+                            if (rotationTimer) rotationTimer.stop();
+                            
+                            // Capture mouse move and up events on window
+                            d3.select(window)
+                                .on("mousemove.globeDrag", handleMouseMove)
+                                .on("mouseup.globeDrag", handleMouseUp);
+                        }
+                    });
+                    
+                    function handleMouseMove(event) {
+                        if (!isDragging) return;
+                        
+                        const mouse = d3.pointer(event, svg.node());
+                        
+                        if (previousMousePosition) {
+                            // Calculate movement
+                            const dx = mouse[0] - previousMousePosition[0];
+                            const dy = mouse[1] - previousMousePosition[1];
+                            
+                            // Get current rotation
+                            const rotation = projection.rotate();
+                            
+                            // Apply rotation with sensitivity scaling
+                            // Lower number = less sensitive
+                            const sensitivity = 0.3;
+                            
+                            projection.rotate([
+                                rotation[0] + dx * sensitivity,
+                                Math.max(-90, Math.min(90, rotation[1] - dy * sensitivity)),
+                                rotation[2]
+                            ]);
+                            
+                            // Update visualization
+                            update();
+                        }
+                        
+                        // Update previous position
+                        previousMousePosition = mouse;
+                    }
+                    
+                    function handleMouseUp() {
+                        isDragging = false;
+                        previousMousePosition = null;
+                        
+                        // Remove event listeners
+                        d3.select(window)
+                            .on("mousemove.globeDrag", null)
+                            .on("mouseup.globeDrag", null);
+                        
+                        // Restart rotation if enabled
+                        if (props.rotationSpeed > 0 && !isAnimating) {
+                            startRotation();
+                        }
+                    }
+                    
+                    // Update the zoom controls to work correctly
+                    // with our direct implementation
+                    zoomControl = {
+                        scale: projection.scale(),
+                        transform: function(selection, transform) {
+                            const newScale = defaultScale * transform.k;
+                            const constrainedScale = Math.max(minScale, Math.min(maxScale, newScale));
+                            
+                            projection.scale(constrainedScale);
+                            zoomControl.scale = constrainedScale;
+                            
+                            d3.select("circle.ocean").attr("r", constrainedScale);
+                            d3.select("circle.outline").attr("r", constrainedScale);
+                            
+                            update();
+                            updateZoomIndicator(constrainedScale);
+                            
+                            // Store the transform for reference
+                            transformRef.current = transform;
+                        }
+                    };
+                    
+                    // Initialize the transform reference
+                    const initialZoomScale = props.initialZoom || 1.25;
+                    transformRef.current = d3.zoomIdentity.scale(initialZoomScale);
+                    
+                    return {
+                        zoomControl: zoomControl
+                    };
+                }
+
+                // Auto-rotation function - improved to work with interactions
                 function startRotation() {
                     if (rotationTimer) rotationTimer.stop();
                     
-                    if (props.rotationSpeed > 0) {
+                    if (props.rotationSpeed > 0 && !isDragging && !isAnimating) {
                         let lastTime = Date.now();
                         rotationTimer = d3.timer(function() {
+                            if (isDragging || isAnimating) return;
+                            
                             const currentTime = Date.now();
                             const elapsed = currentTime - lastTime;
                             lastTime = currentTime;
-
+                
                             const rotation = projection.rotate();
                             projection.rotate([
                                 rotation[0] + elapsed * rotationSpeed,
@@ -936,13 +1095,20 @@ define(['qlik', 'jquery', 'text!./globeCoordinates.json', './d3.v7'], function(q
                     }
                 }
 
+// End of Part 8
+                /**
+ * Qlik Globe Points Visualization
+ * Part 9: Finalization
+ */
                 // Initialize interactions
                 setupInteractions();
-                startRotation();
-
-                // Initial update
+                
+                // Initial update and indicators
                 update();
                 updateZoomIndicator(defaultScale);
+                
+                // Start rotation if enabled
+                startRotation();
 
                 // Add cleanup
                 $element.on('$destroy', function() {
@@ -959,14 +1125,22 @@ define(['qlik', 'jquery', 'text!./globeCoordinates.json', './d3.v7'], function(q
             return qlik.Promise.resolve();
         },
 
+        // Additional methods for extension
         resize: function($element, layout) {
+            // Simply redraw the entire visualization when resized
             this.paint($element, layout);
         },
         
+        // Support capabilities
         support: {
             snapshot: true,
             export: true,
             exportData: true
         }
     };
+
+    // Return the extension definition
+    return extensionDefinition;
 });
+
+// End of Part 9
