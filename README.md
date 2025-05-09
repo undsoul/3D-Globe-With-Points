@@ -20,25 +20,23 @@ https://github.com/user-attachments/assets/4a20d88c-7858-4141-92b2-42bc13435611
 
 ## Installation
 
-### Qlik Sense Desktop
-1. Download the latest release
-2. Extract the zip file to your Qlik Sense Extensions directory:
-   - Typically located at `C:\Users\[USERNAME]\Documents\Qlik\Sense\Extensions\`
-3. Restart Qlik Sense Desktop if it's already running
+### Qlik Sense Desktop / On-Premises
 
-### Qlik Sense Enterprise on Windows
-1. Download the latest release
-2. In the QMC (Qlik Management Console), navigate to the **Extensions** section
-3. Click **Import** and select the zip file
-4. Click **Import** to upload and install the extension
+1. Download the latest release ZIP file from the [releases page](https://github.com/yourusername/qlik-globe/releases)
+2. Extract the ZIP file
+3. Copy the extracted folder to your Qlik Sense extensions directory:
+   - Qlik Sense Desktop: `C:\Users\[USERNAME]\Documents\Qlik\Sense\Extensions\`
+   - Qlik Sense Server: Import through the QMC (Qlik Management Console)
 
 ### Qlik Sense Cloud
-1. Download the latest release 
-2. Log in to Qlik Sense Cloud
-3. Navigate to the **Admin** menu (⚙️) in the top right corner
-4. Select **Extensions** from the dropdown menu
-5. Click **Add** and select the zip file
-6. After the extension is uploaded, it will be available in the visualization options in your Qlik Sense Cloud apps
+
+1. Download the latest release ZIP file from the [releases page](https://github.com/yourusername/qlik-globe/releases)
+2. Log in to your Qlik Sense Cloud tenant
+3. Navigate to the hub and open the app where you want to use the extension
+4. Click on "Add new" in the left panel
+5. Select "Extension" and then "Upload extension"
+6. Choose the downloaded ZIP file and upload
+7. The extension will now be available in your app
 
 ## Configuration
 The extension requires at least 3 dimensions and supports up to 2 optional measures:
