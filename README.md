@@ -148,7 +148,7 @@ To contribute to this project:
 For local development:
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/qlik-globe-points.git
+git clone https://github.com/undsoul/qlik-globe-points.git
 
 # Navigate to the extension directory
 cd qlik-globe-points
